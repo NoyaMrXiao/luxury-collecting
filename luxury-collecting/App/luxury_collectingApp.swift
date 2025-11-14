@@ -25,14 +25,8 @@ struct luxury_collectingApp: App {
             return
         }
         
-        let publishableKey = ProcessInfo.processInfo.environment["SUPABASE_PUBLISHABLE_KEY"]
-            ?? Bundle.main.object(forInfoDictionaryKey: "SUPABASE_PUBLISHABLE_KEY") as? String
+        let publishableKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhxcXNvd2lobm1qc3RmZWJha2N0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5MzAwMDAsImV4cCI6MjA3ODUwNjAwMH0.k_swLo6eSUDoMV8QWxjegOg-VamQsymzoTfyt439eb4"
         
-        guard let key = publishableKey, !key.isEmpty else {
-            assertionFailure("Supabase Publishable Key 未配置")
-            return
-        }
-        
-        SupabaseService.shared.configure(url: url, anonKey: key)
+        SupabaseService.shared.configure(url: url, anonKey: publishableKey)
     }
 }

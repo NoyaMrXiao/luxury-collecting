@@ -7,6 +7,7 @@
 
 import Foundation
 import Supabase
+import Auth
 
 /// Supabase 客户端配置错误
 enum SupabaseConfigurationError: Error {
@@ -26,9 +27,16 @@ final class SupabaseService {
     private init() {
         // 尝试自动加载默认配置
         if let configuration = Self.loadDefaultConfiguration() {
+            // Configure auth options to emit local session as initial session
+            let defaultOptions = SupabaseClientOptions()
+            let authType = type(of: defaultOptions.auth)
+            // Try to create auth config with the property
+            let authConfig = authType.init(emitLocalSessionAsInitialSession: true)
+            let options = SupabaseClientOptions(auth: authConfig)
             client = SupabaseClient(
                 supabaseURL: configuration.url,
-                supabaseKey: configuration.anonKey
+                supabaseKey: configuration.anonKey,
+                options: options
             )
         }
     }
@@ -42,7 +50,16 @@ final class SupabaseService {
     func configure(url: URL, anonKey: String) {
         lock.lock()
         defer { lock.unlock() }
-        client = SupabaseClient(supabaseURL: url, supabaseKey: anonKey)
+        // Configure auth options to emit local session as initial session
+        let defaultOptions = SupabaseClientOptions()
+        let authType = type(of: defaultOptions.auth)
+        let authConfig = authType.init(emitLocalSessionAsInitialSession: true)
+        let options = SupabaseClientOptions(auth: authConfig)
+        client = SupabaseClient(
+            supabaseURL: url,
+            supabaseKey: anonKey,
+            options: options
+        )
     }
     
     /// 获取已配置的 Supabase 客户端

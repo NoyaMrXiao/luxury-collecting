@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AuthenticationServices
 
 struct RegisterView: View {
     @ObservedObject var authViewModel: AuthViewModel
@@ -49,10 +50,13 @@ struct RegisterView: View {
                                 .foregroundColor(.secondary)
                             TextField("请输入姓名", text: $name)
                                 .textFieldStyle(.roundedBorder)
+                                .disabled(authViewModel.isLoading)
                                 .focused($focusedField, equals: .name)
                                 .submitLabel(.next)
                                 .onSubmit {
-                                    focusedField = .email
+                                    if !authViewModel.isLoading {
+                                        focusedField = .email
+                                    }
                                 }
                         }
                         
@@ -66,10 +70,13 @@ struct RegisterView: View {
                                 .keyboardType(.emailAddress)
                                 .autocapitalization(.none)
                                 .autocorrectionDisabled()
+                                .disabled(authViewModel.isLoading)
                                 .focused($focusedField, equals: .email)
                                 .submitLabel(.next)
                                 .onSubmit {
-                                    focusedField = .password
+                                    if !authViewModel.isLoading {
+                                        focusedField = .password
+                                    }
                                 }
                         }
                         
@@ -80,10 +87,13 @@ struct RegisterView: View {
                                 .foregroundColor(.secondary)
                             SecureField("请输入密码（至少6位）", text: $password)
                                 .textFieldStyle(.roundedBorder)
+                                .disabled(authViewModel.isLoading)
                                 .focused($focusedField, equals: .password)
                                 .submitLabel(.next)
                                 .onSubmit {
-                                    focusedField = .confirmPassword
+                                    if !authViewModel.isLoading {
+                                        focusedField = .confirmPassword
+                                    }
                                 }
                         }
                         
@@ -94,10 +104,13 @@ struct RegisterView: View {
                                 .foregroundColor(.secondary)
                             SecureField("请再次输入密码", text: $confirmPassword)
                                 .textFieldStyle(.roundedBorder)
+                                .disabled(authViewModel.isLoading)
                                 .focused($focusedField, equals: .confirmPassword)
                                 .submitLabel(.go)
                                 .onSubmit {
-                                    register()
+                                    if !authViewModel.isLoading {
+                                        register()
+                                    }
                                 }
                         }
                         
@@ -111,23 +124,85 @@ struct RegisterView: View {
                         
                         // 注册按钮
                         Button(action: register) {
-                            Text("注册")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(
-                                    LinearGradient(
-                                        colors: [.blue, .purple],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
+                            HStack(spacing: 8) {
+                                if authViewModel.isLoading {
+                                    ProgressView()
+                                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                        .scaleEffect(0.8)
+                                }
+                                Text(authViewModel.isLoading ? "注册中..." : "注册")
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(
+                                LinearGradient(
+                                    colors: [.blue, .purple],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
                                 )
-                                .cornerRadius(12)
+                            )
+                            .cornerRadius(12)
                         }
-                        .disabled(!isValid)
-                        .opacity(isValid ? 1.0 : 0.6)
+                        .disabled(!isValid || authViewModel.isLoading)
+                        .opacity((!isValid || authViewModel.isLoading) ? 0.6 : 1.0)
                         .padding(.top, 8)
+                        
+                        // 分隔线
+                        HStack {
+                            Rectangle()
+                                .fill(Color.secondary.opacity(0.3))
+                                .frame(height: 1)
+                            Text("或")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 12)
+                            Rectangle()
+                                .fill(Color.secondary.opacity(0.3))
+                                .frame(height: 1)
+                        }
+                        .padding(.vertical, 16)
+                        
+                        // Sign in with Apple 按钮
+                        SignInWithAppleButton(
+                            onRequest: { request in
+                                request.requestedScopes = [.fullName, .email]
+                            },
+                            onCompletion: { result in
+                                handleAppleSignInResult(result)
+                            }
+                        )
+                        .signInWithAppleButtonStyle(.black)
+                        .frame(height: 50)
+                        .cornerRadius(12)
+                        .disabled(authViewModel.isLoading)
+                        .opacity(authViewModel.isLoading ? 0.6 : 1.0)
+                        
+                        // Google 登录按钮
+                        Button(action: {
+                            handleGoogleSignIn()
+                        }) {
+                            HStack(spacing: 12) {
+                                Image("google")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 20, height: 20)
+                                Text("使用 Google 账号继续")
+                                    .font(.system(size: 16, weight: .medium))
+                            }
+                            .foregroundColor(.primary)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .background(Color(.systemBackground))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                            )
+                        }
+                        .cornerRadius(12)
+                        .disabled(authViewModel.isLoading)
+                        .opacity(authViewModel.isLoading ? 0.6 : 1.0)
                     }
                     .padding(.horizontal, 24)
                     .padding(.bottom, 20)
@@ -139,12 +214,21 @@ struct RegisterView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") {
-                        dismiss()
+                        if !authViewModel.isLoading {
+                            dismiss()
+                        }
                     }
+                    .disabled(authViewModel.isLoading)
                 }
             }
             .onTapGesture {
                 focusedField = nil
+            }
+            .onChange(of: authViewModel.isLoading) { isLoading in
+                if isLoading {
+                    // 加载开始时取消焦点，避免键盘约束冲突
+                    focusedField = nil
+                }
             }
         }
     }
@@ -162,12 +246,39 @@ struct RegisterView: View {
             return
         }
         
+        // 先取消焦点，避免键盘约束冲突
+        focusedField = nil
+        
         Task {
             let success = await authViewModel.register(
                 email: email,
                 password: password,
                 name: name.isEmpty ? nil : name
             )
+            if success {
+                dismiss()
+            }
+        }
+    }
+    
+    private func handleAppleSignInResult(_ result: Result<ASAuthorization, Error>) {
+        switch result {
+        case .success(let authorization):
+            Task {
+                let success = await authViewModel.signInWithApple(authorization: authorization)
+                if success {
+                    dismiss()
+                }
+            }
+        case .failure(let error):
+            authViewModel.errorMessage = "Apple 登录失败: \(error.localizedDescription)"
+        }
+    }
+    
+    private func handleGoogleSignIn() {
+        focusedField = nil
+        Task {
+            let success = await authViewModel.signInWithGoogle()
             if success {
                 dismiss()
             }

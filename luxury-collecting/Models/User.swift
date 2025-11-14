@@ -7,18 +7,29 @@
 
 import Foundation
 
-/// 用户模型
+/// 用户模型（来自自建 users 表）
 struct User: Codable, Equatable {
     let id: UUID
     var email: String
-    var password: String // 实际应用中应该存储哈希值
-    var name: String?
+    var username: String?
+    var isActive: Bool
+    var createdAt: Date?
+    var updatedAt: Date?
     
-    init(id: UUID = UUID(), email: String, password: String, name: String? = nil) {
+    init(
+        id: UUID,
+        email: String,
+        username: String? = nil,
+        isActive: Bool = true,
+        createdAt: Date? = nil,
+        updatedAt: Date? = nil
+    ) {
         self.id = id
         self.email = email
-        self.password = password
-        self.name = name
+        self.username = username
+        self.isActive = isActive
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }
 

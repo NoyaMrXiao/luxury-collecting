@@ -9,8 +9,14 @@ import SwiftUI
 
 struct MyPageView: View {
     @ObservedObject var authViewModel: AuthViewModel
-    @State private var showingLogin = false
-    @State private var showingRegister = false
+    @State private var presentedSheet: SheetType? = nil
+    
+    enum SheetType: Identifiable {
+        case login
+        case register
+        
+        var id: Self { self }
+    }
     
     var body: some View {
         List {
@@ -25,7 +31,7 @@ struct MyPageView: View {
                             .frame(width: 56, height: 56)
                             .foregroundColor(.accentColor)
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(authViewModel.currentUser?.name ?? authViewModel.currentUser?.email ?? "用户")
+                            Text(authViewModel.currentUser?.username ?? authViewModel.currentUser?.email ?? "用户")
                                 .font(.title3)
                                 .fontWeight(.semibold)
                             if let email = authViewModel.currentUser?.email {
@@ -57,7 +63,7 @@ struct MyPageView: View {
                         
                         HStack(spacing: 12) {
                             Button(action: {
-                                showingLogin = true
+                                presentedSheet = .login
                             }) {
                                 Text("登录")
                                     .font(.headline)
@@ -75,7 +81,7 @@ struct MyPageView: View {
                             }
                             
                             Button(action: {
-                                showingRegister = true
+                                presentedSheet = .register
                             }) {
                                 Text("注册")
                                     .font(.headline)
@@ -131,7 +137,9 @@ struct MyPageView: View {
             if authViewModel.isAuthenticated {
                 Section {
                     Button(role: .destructive) {
-                        authViewModel.logout()
+                        Task {
+                            await authViewModel.logout()
+                        }
                     } label: {
                         HStack {
                             Spacer()
@@ -145,11 +153,15 @@ struct MyPageView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("我的")
-        .sheet(isPresented: $showingLogin) {
-            LoginView(authViewModel: authViewModel)
-        }
-        .sheet(isPresented: $showingRegister) {
-            RegisterView(authViewModel: authViewModel)
+        .sheet(item: $presentedSheet) { sheetType in
+            switch sheetType {
+            case .login:
+                LoginView(authViewModel: authViewModel, onShowRegister: {
+                    presentedSheet = .register
+                })
+            case .register:
+                RegisterView(authViewModel: authViewModel)
+            }
         }
     }
 }
