@@ -6,6 +6,9 @@
 //
 
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 struct LuxuryItemDetailView: View {
     let item: LuxuryItem
@@ -26,30 +29,7 @@ struct LuxuryItemDetailView: View {
         ScrollView {
             VStack(spacing: 0) {
                 // 商品图片 - 全宽展示
-                if let imageURL = currentItem.imageURL,
-                   FileManager.default.fileExists(atPath: imageURL),
-                   let imageData = try? Data(contentsOf: URL(fileURLWithPath: imageURL)),
-                   let uiImage = UIImage(data: imageData) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity)
-                        .background(Color(.secondarySystemBackground))
-                } else {
-                    ZStack {
-                        Rectangle()
-                            .fill(Color(.secondarySystemBackground))
-                            .frame(height: 400)
-                        VStack(spacing: 12) {
-                            Image(systemName: "photo.on.rectangle.angled")
-                                .font(.system(size: 64))
-                                .foregroundColor(.secondary)
-                            Text("暂无图片")
-                                .font(.title3)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
+                productImageSection()
                 
                 // 商品信息卡片区域
                 VStack(spacing: 16) {
@@ -241,8 +221,88 @@ struct LuxuryItemDetailView: View {
     }
 }
 
+private extension LuxuryItemDetailView {
+    @ViewBuilder
+    func productImageSection() -> some View {
+        if let urlString = currentItem.imageURL {
+            if let remoteURL = URL(string: urlString),
+               remoteURL.scheme?.hasPrefix("http") == true {
+                AsyncImage(url: remoteURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity)
+                            .background(Color(.secondarySystemBackground))
+                    case .failure:
+                        imagePlaceholder()
+                    case .empty:
+                        imagePlaceholder()
+                            .overlay(ProgressView())
+                    @unknown default:
+                        imagePlaceholder()
+                    }
+                }
+            } else {
+                legacyImageSection(for: urlString)
+            }
+        } else {
+            imagePlaceholder()
+        }
+    }
+    
+    @ViewBuilder
+    func imagePlaceholder() -> some View {
+        ZStack {
+            Rectangle()
+                .fill(Color(.secondarySystemBackground))
+                .frame(height: 400)
+            VStack(spacing: 12) {
+                Image(systemName: "photo.on.rectangle.angled")
+                    .font(.system(size: 64))
+                    .foregroundColor(.secondary)
+                Text("暂无图片")
+                    .font(.title3)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+    
+    @ViewBuilder
+    func legacyImageSection(for path: String) -> some View {
+        #if os(iOS)
+        if let legacyImage = legacyLocalImage(path: path) {
+            Image(uiImage: legacyImage)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity)
+                .background(Color(.secondarySystemBackground))
+        } else {
+            imagePlaceholder()
+        }
+        #else
+        imagePlaceholder()
+        #endif
+    }
+}
+
 #if os(iOS)
-import UIKit
+private extension LuxuryItemDetailView {
+    func legacyLocalImage(path: String) -> UIImage? {
+        let resolvedPath: String
+        if path.hasPrefix("file://"), let url = URL(string: path) {
+            resolvedPath = url.path
+        } else {
+            resolvedPath = path
+        }
+        guard FileManager.default.fileExists(atPath: resolvedPath),
+              let data = try? Data(contentsOf: URL(fileURLWithPath: resolvedPath)) else {
+            return nil
+        }
+        return UIImage(data: data)
+    }
+}
 #endif
 
 #Preview {

@@ -6,6 +6,9 @@
 //
 
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 struct LuxuryItemListRowView: View {
     let item: LuxuryItem
@@ -13,26 +16,7 @@ struct LuxuryItemListRowView: View {
     var body: some View {
         HStack(spacing: 16) {
             // 商品图片
-            if let imageURL = item.imageURL,
-               FileManager.default.fileExists(atPath: imageURL),
-               let imageData = try? Data(contentsOf: URL(fileURLWithPath: imageURL)),
-               let uiImage = UIImage(data: imageData) {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 100, height: 100)
-                    .cornerRadius(8)
-                    .clipped()
-            } else {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.secondarySystemBackground))
-                        .frame(width: 100, height: 100)
-                    Image(systemName: "photo.on.rectangle.angled")
-                        .font(.system(size: 32))
-                        .foregroundColor(.secondary)
-                }
-            }
+            productImage()
             
             // 商品信息
             VStack(alignment: .leading, spacing: 6) {
@@ -76,9 +60,78 @@ struct LuxuryItemListRowView: View {
     }
 }
 
-#if os(iOS)
-import UIKit
-#endif
+private extension LuxuryItemListRowView {
+    @ViewBuilder
+    func productImage() -> some View {
+        if let urlString = item.imageURL {
+            if let remoteURL = URL(string: urlString),
+               remoteURL.scheme?.hasPrefix("http") == true {
+                AsyncImage(url: remoteURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 100, height: 100)
+                            .cornerRadius(8)
+                            .clipped()
+                    case .failure:
+                        placeholder
+                    case .empty:
+                        placeholder
+                            .overlay(ProgressView())
+                    @unknown default:
+                        placeholder
+                    }
+                }
+            } else {
+                #if os(iOS)
+                if let legacyImage = legacyLocalImage(path: urlString) {
+                    Image(uiImage: legacyImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 100, height: 100)
+                        .cornerRadius(8)
+                        .clipped()
+                } else {
+                    placeholder
+                }
+                #else
+                placeholder
+                #endif
+            }
+        } else {
+            placeholder
+        }
+    }
+    
+    var placeholder: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(.secondarySystemBackground))
+                .frame(width: 100, height: 100)
+            Image(systemName: "photo.on.rectangle.angled")
+                .font(.system(size: 32))
+                .foregroundColor(.secondary)
+        }
+    }
+    
+    #if os(iOS)
+    func legacyLocalImage(path: String) -> UIImage? {
+        let resolvedPath: String
+        if path.hasPrefix("file://"), let url = URL(string: path) {
+            resolvedPath = url.path
+        } else {
+            resolvedPath = path
+        }
+        guard FileManager.default.fileExists(atPath: resolvedPath),
+              let data = try? Data(contentsOf: URL(fileURLWithPath: resolvedPath)) else {
+            return nil
+        }
+        return UIImage(data: data)
+    }
+    #endif
+}
 
 #Preview {
     LuxuryItemListRowView(

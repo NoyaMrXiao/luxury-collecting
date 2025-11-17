@@ -6,6 +6,9 @@
 //
 
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 struct LuxuryItemSwiperView: View {
     let item: LuxuryItem
@@ -17,30 +20,7 @@ struct LuxuryItemSwiperView: View {
                 Spacer()
                 
                 // 商品图片
-                if let imageURL = item.imageURL,
-                   FileManager.default.fileExists(atPath: imageURL),
-                   let imageData = try? Data(contentsOf: URL(fileURLWithPath: imageURL)),
-                   let uiImage = UIImage(data: imageData) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: geometry.size.width * 0.9)
-                        .frame(maxHeight: geometry.size.height * 0.7)
-                } else {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(.secondarySystemBackground))
-                            .frame(width: geometry.size.width * 0.9, height: geometry.size.height * 0.7)
-                        VStack(spacing: 12) {
-                            Image(systemName: "photo.on.rectangle.angled")
-                                .font(.system(size: 64))
-                                .foregroundColor(.secondary)
-                            Text("暂无图片")
-                                .font(.title3)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
+                productImage(width: geometry.size.width * 0.9, height: geometry.size.height * 0.7)
                 
                 // 商品名称
                 Text(item.name)
@@ -63,9 +43,82 @@ struct LuxuryItemSwiperView: View {
     }
 }
 
-#if os(iOS)
-import UIKit
-#endif
+private extension LuxuryItemSwiperView {
+    @ViewBuilder
+    func productImage(width: CGFloat, height: CGFloat) -> some View {
+        if let urlString = item.imageURL {
+            if let remoteURL = URL(string: urlString),
+               remoteURL.scheme?.hasPrefix("http") == true {
+                AsyncImage(url: remoteURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: width)
+                            .frame(maxHeight: height)
+                    case .failure:
+                        placeholder(width: width, height: height)
+                    case .empty:
+                        placeholder(width: width, height: height)
+                            .overlay(ProgressView())
+                    @unknown default:
+                        placeholder(width: width, height: height)
+                    }
+                }
+            } else {
+                #if os(iOS)
+                if let legacyImage = legacyLocalImage(path: urlString) {
+                    Image(uiImage: legacyImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: width)
+                        .frame(maxHeight: height)
+                } else {
+                    placeholder(width: width, height: height)
+                }
+                #else
+                placeholder(width: width, height: height)
+                #endif
+            }
+        } else {
+            placeholder(width: width, height: height)
+        }
+    }
+    
+    @ViewBuilder
+    func placeholder(width: CGFloat, height: CGFloat) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.secondarySystemBackground))
+                .frame(width: width, height: height)
+            VStack(spacing: 12) {
+                Image(systemName: "photo.on.rectangle.angled")
+                    .font(.system(size: 64))
+                    .foregroundColor(.secondary)
+                Text("暂无图片")
+                    .font(.title3)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+    
+    #if os(iOS)
+    func legacyLocalImage(path: String) -> UIImage? {
+        let resolvedPath: String
+        if path.hasPrefix("file://"), let url = URL(string: path) {
+            resolvedPath = url.path
+        } else {
+            resolvedPath = path
+        }
+        guard FileManager.default.fileExists(atPath: resolvedPath),
+              let data = try? Data(contentsOf: URL(fileURLWithPath: resolvedPath)) else {
+            return nil
+        }
+        return UIImage(data: data)
+    }
+    #endif
+}
 
 #Preview {
     LuxuryItemSwiperView(

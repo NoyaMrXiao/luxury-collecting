@@ -36,9 +36,18 @@ class LuxuryItemViewModel: ObservableObject {
         isLoading = false
     }
     
-    func addItem(_ item: LuxuryItem) async {
+    func addItem(_ item: LuxuryItem, imageUploadData: ImageUploadData? = nil) async {
         do {
-            try await service.saveItem(item)
+            var itemToSave = item
+            if let uploadData = imageUploadData {
+                let url = try await service.uploadImage(
+                    data: uploadData.data,
+                    fileName: uploadData.fileName,
+                    fileExtension: uploadData.fileExtension
+                )
+                itemToSave.imageURL = url
+            }
+            try await service.saveItem(itemToSave)
             await loadItems()
         } catch {
             errorMessage = error.localizedDescription
@@ -54,9 +63,28 @@ class LuxuryItemViewModel: ObservableObject {
         }
     }
     
-    func updateItem(_ item: LuxuryItem) async {
+    func uploadImage(data: Data, fileName: String?, fileExtension: String) async throws -> String {
+        try await service.uploadImage(data: data, fileName: fileName, fileExtension: fileExtension)
+    }
+    
+    func updateItem(
+        _ item: LuxuryItem,
+        imageUploadData: ImageUploadData? = nil,
+        removeImage: Bool = false
+    ) async {
         do {
-            try await service.updateItem(item)
+            var itemToUpdate = item
+            if removeImage {
+                itemToUpdate.imageURL = nil
+            } else if let uploadData = imageUploadData {
+                let url = try await service.uploadImage(
+                    data: uploadData.data,
+                    fileName: uploadData.fileName,
+                    fileExtension: uploadData.fileExtension
+                )
+                itemToUpdate.imageURL = url
+            }
+            try await service.updateItem(itemToUpdate)
             await loadItems()
         } catch {
             errorMessage = error.localizedDescription

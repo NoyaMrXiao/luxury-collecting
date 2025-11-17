@@ -25,7 +25,8 @@ struct EditLuxuryItemView: View {
     #if os(iOS)
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var selectedImageData: Data?
-    @State private var existingImagePath: String?
+    @State private var existingImageURL: String?
+    @State private var shouldRemoveImage: Bool = false
     #endif
     
     init(viewModel: LuxuryItemViewModel, item: LuxuryItem) {
@@ -83,11 +84,30 @@ struct EditLuxuryItemView: View {
                                 .scaledToFit()
                                 .frame(maxHeight: 180)
                                 .cornerRadius(8)
-                        } else if let imagePath = existingImagePath,
-                                  FileManager.default.fileExists(atPath: imagePath),
-                                  let imageData = try? Data(contentsOf: URL(fileURLWithPath: imagePath)),
-                                  let uiImage = UIImage(data: imageData) {
-                            Image(uiImage: uiImage)
+                        } else if let urlString = existingImageURL,
+                                  let remoteURL = URL(string: urlString),
+                                  remoteURL.scheme?.hasPrefix("http") == true {
+                            AsyncImage(url: remoteURL) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(maxHeight: 180)
+                                        .cornerRadius(8)
+                                case .failure:
+                                    placeholderView
+                                case .empty:
+                                    placeholderView
+                                        .overlay(
+                                            ProgressView()
+                                        )
+                                @unknown default:
+                                    placeholderView
+                                }
+                            }
+                        } else if let fallbackImage = legacyLocalImage() {
+                            Image(uiImage: fallbackImage)
                                 .resizable()
                                 .scaledToFit()
                                 .frame(maxHeight: 180)
@@ -110,7 +130,7 @@ struct EditLuxuryItemView: View {
                         }
                         
                         PhotosPicker(selection: $selectedPhotoItem, matching: .images, photoLibrary: .shared()) {
-                            Label(selectedImageData == nil && existingImagePath == nil ? "选择图片" : "更换图片", systemImage: "photo")
+                            Label(selectedImageData == nil && existingImageURL == nil ? "选择图片" : "更换图片", systemImage: "photo")
                         }
                         .onChange(of: selectedPhotoItem) { newItem in
                             guard let newItem else { return }
@@ -118,15 +138,17 @@ struct EditLuxuryItemView: View {
                                 if let data = try? await newItem.loadTransferable(type: Data.self) {
                                     await MainActor.run {
                                         self.selectedImageData = data
+                                        self.shouldRemoveImage = false
                                     }
                                 }
                             }
                         }
                         
-                        if existingImagePath != nil {
+                        if existingImageURL != nil || selectedImageData != nil {
                             Button(role: .destructive) {
                                 selectedImageData = nil
-                                existingImagePath = nil
+                                existingImageURL = nil
+                                shouldRemoveImage = true
                             } label: {
                                 Label("删除图片", systemImage: "trash")
                             }
@@ -181,7 +203,8 @@ struct EditLuxuryItemView: View {
         purchaseDate = item.purchaseDate
         description = item.description ?? ""
         #if os(iOS)
-        existingImagePath = item.imageURL
+        existingImageURL = item.imageURL
+        shouldRemoveImage = false
         #endif
     }
     
@@ -192,42 +215,6 @@ struct EditLuxuryItemView: View {
     private func saveItem() {
         guard let priceValue = Double(price) else { return }
         
-        var imagePathString: String? = nil
-        var oldImagePathToDelete: String? = nil
-        
-        #if os(iOS)
-        // 如果选择了新图片，保存新图片
-        if let data = selectedImageData {
-            let filename = UUID().uuidString + ".png"
-            if let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-                let fileURL = documentsURL.appendingPathComponent(filename)
-                do {
-                    try data.write(to: fileURL, options: .atomic)
-                    imagePathString = fileURL.path
-                    
-                    // 标记旧图片待删除
-                    if let oldPath = existingImagePath, oldPath != fileURL.path {
-                        oldImagePathToDelete = oldPath
-                    }
-                } catch {
-                    // 失败时使用旧图片路径
-                    imagePathString = existingImagePath
-                }
-            }
-        } else if existingImagePath != nil {
-            // 保持原有图片
-            imagePathString = existingImagePath
-        }
-        // 如果 existingImagePath == nil 且 selectedImageData == nil，说明用户删除了图片
-        // imagePathString 保持为 nil
-        
-        // 删除旧图片文件（如果用户选择了新图片或删除了图片）
-        if let oldPath = oldImagePathToDelete ?? (existingImagePath == nil && selectedImageData == nil ? item.imageURL : nil),
-           FileManager.default.fileExists(atPath: oldPath) {
-            try? FileManager.default.removeItem(atPath: oldPath)
-        }
-        #endif
-        
         let updatedItem = LuxuryItem(
             id: item.id,
             name: name,
@@ -236,14 +223,54 @@ struct EditLuxuryItemView: View {
             price: priceValue,
             purchaseDate: purchaseDate,
             description: description.isEmpty ? nil : description,
-            imageURL: imagePathString
+            imageURL: existingImageURL ?? item.imageURL
         )
         
         Task {
+            #if os(iOS)
+            let uploadData = selectedImageData.flatMap { ImageUploadHelper.prepareUploadData(from: $0) }
+            await viewModel.updateItem(
+                updatedItem,
+                imageUploadData: uploadData,
+                removeImage: shouldRemoveImage && uploadData == nil
+            )
+            #else
             await viewModel.updateItem(updatedItem)
+            #endif
             dismiss()
         }
     }
+    
+    #if os(iOS)
+    private var placeholderView: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(.secondarySystemBackground))
+            Image(systemName: "photo.on.rectangle.angled")
+                .font(.system(size: 28))
+                .foregroundColor(.secondary)
+        }
+        .frame(height: 180)
+    }
+    
+    private func legacyLocalImage() -> UIImage? {
+        guard let path = existingImageURL else { return nil }
+        if path.hasPrefix("http") {
+            return nil
+        }
+        let resolvedPath: String
+        if path.hasPrefix("file://"), let url = URL(string: path) {
+            resolvedPath = url.path
+        } else {
+            resolvedPath = path
+        }
+        guard FileManager.default.fileExists(atPath: resolvedPath),
+              let data = try? Data(contentsOf: URL(fileURLWithPath: resolvedPath)) else {
+            return nil
+        }
+        return UIImage(data: data)
+    }
+    #endif
 }
 
 #Preview {

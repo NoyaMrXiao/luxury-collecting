@@ -24,6 +24,10 @@ struct AddLuxuryItemView: View {
     #if os(iOS)
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var selectedImageData: Data?
+    @State private var selectedImageUploadData: ImageUploadData?
+    @State private var uploadedImageURL: String?
+    @State private var isUploadingImage: Bool = false
+    @State private var uploadErrorMessage: String?
     // 背景去除功能已注释
     // @State private var processedImageData: Data?
     // @State private var isProcessingImage: Bool = false
@@ -122,31 +126,52 @@ struct AddLuxuryItemView: View {
                         PhotosPicker(selection: $selectedPhotoItem, matching: .images, photoLibrary: .shared()) {
                             Label(selectedImageData == nil ? "选择图片" : "更换图片", systemImage: "photo")
                         }
-                        .onChange(of: selectedPhotoItem) { newItem in
+                        .onChange(of: selectedPhotoItem) { _, newItem in
                             guard let newItem else { return }
                             Task {
                                 if let data = try? await newItem.loadTransferable(type: Data.self) {
                                     await MainActor.run {
                                         self.selectedImageData = data
-                                        // 背景去除功能已注释
-                                        // self.processedImageData = nil
-                                        // self.isProcessingImage = true
+                                        self.uploadedImageURL = nil
+                                        self.uploadErrorMessage = nil
+                                        self.selectedImageUploadData = nil
                                     }
-                                    // 自动处理图片去背景功能已注释
-                                    // #if os(iOS)
-                                    // if let processedData = await BackgroundRemovalService.removeBackground(from: data) {
-                                    //     await MainActor.run {
-                                    //         self.processedImageData = processedData
-                                    //         self.isProcessingImage = false
-                                    //     }
-                                    // } else {
-                                    //     await MainActor.run {
-                                    //         self.isProcessingImage = false
-                                    //     }
-                                    // }
-                                    // #endif
+                                    
+                                    if let uploadData = ImageUploadHelper.prepareUploadData(from: data) {
+                                        await MainActor.run {
+                                            self.selectedImageUploadData = uploadData
+                                        }
+                                        await uploadSelectedImage(with: uploadData)
+                                    } else {
+                                        await MainActor.run {
+                                            self.uploadErrorMessage = "无法处理所选图片"
+                                        }
+                                    }
                                 }
                             }
+                        }
+                        
+                        if isUploadingImage {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                Text("正在上传图片...")
+                                    .font(.footnote)
+                                    .foregroundColor(.secondary)
+                            }
+                        } else if let uploadedImageURL {
+                            HStack(spacing: 6) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                Text("图片已上传")
+                                    .font(.footnote)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        
+                        if let uploadErrorMessage {
+                            Text(uploadErrorMessage)
+                                .font(.footnote)
+                                .foregroundColor(.red)
                         }
                     }
                 }
@@ -181,7 +206,7 @@ struct AddLuxuryItemView: View {
                     Button("保存") {
                         saveItem()
                     }
-                    .disabled(!isValid)
+                    .disabled(!isValid || isUploadingImage)
                 }
             }
         }
@@ -194,42 +219,74 @@ struct AddLuxuryItemView: View {
     private func saveItem() {
         guard let priceValue = Double(price) else { return }
         
-        var imagePathString: String? = nil
-        #if os(iOS)
-        // 背景去除功能已注释，只使用原始图片
-        // let dataToSave = processedImageData ?? selectedImageData
-        let dataToSave = selectedImageData
-        if let data = dataToSave {
-            let filename = UUID().uuidString + ".png" // 使用PNG格式以支持透明背景
-            if let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-                let fileURL = documentsURL.appendingPathComponent(filename)
-                do {
-                    try data.write(to: fileURL, options: .atomic)
-                    imagePathString = fileURL.path
-                } catch {
-                    // 失败时忽略图片保存，不阻塞文字信息保存
-                    imagePathString = nil
-                }
-            }
-        }
-        #endif
-        
-        let item = LuxuryItem(
+        var item = LuxuryItem(
             name: name,
             brand: brand,
             category: category,
             price: priceValue,
             purchaseDate: purchaseDate,
             description: description.isEmpty ? nil : description,
-            imageURL: imagePathString
+            imageURL: nil
         )
         
         Task {
+            #if os(iOS)
+            if let uploadedImageURL {
+                item.imageURL = uploadedImageURL
+                await viewModel.addItem(item)
+            } else {
+                let uploadData = selectedImageUploadData ?? selectedImageData.flatMap { ImageUploadHelper.prepareUploadData(from: $0) }
+                await viewModel.addItem(item, imageUploadData: uploadData)
+            }
+            #else
             await viewModel.addItem(item)
+            #endif
             dismiss()
         }
     }
 }
+
+#if os(iOS)
+extension AddLuxuryItemView {
+    private func uploadSelectedImage(with uploadData: ImageUploadData) async {
+        let sizeInKB = Double(uploadData.data.count) / 1024.0
+        print("[AddLuxuryItemView] 🚀 Upload starting (\(String(format: "%.2f", sizeInKB)) KB, ext: \(uploadData.fileExtension))")
+        await MainActor.run {
+            self.isUploadingImage = true
+            self.uploadErrorMessage = nil
+        }
+        
+        do {
+            let url = try await viewModel.uploadImage(
+                data: uploadData.data,
+                fileName: uploadData.fileName,
+                fileExtension: uploadData.fileExtension
+            )
+            print("[AddLuxuryItemView] ✅ Upload succeeded: \(url)")
+            await MainActor.run {
+                self.uploadedImageURL = url
+            }
+        } catch {
+            print("[AddLuxuryItemView] ❌ Upload failed: \(error)")
+            await MainActor.run {
+                self.uploadErrorMessage = error.localizedDescription
+                self.uploadedImageURL = nil
+            }
+        }
+        
+        await MainActor.run {
+            self.isUploadingImage = false
+            print("[AddLuxuryItemView] 🛑 Upload flow finished")
+        }
+    }
+}
+
+extension AddLuxuryItemView {
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+#endif
 
 #Preview {
     AddLuxuryItemView(viewModel: LuxuryItemViewModel())

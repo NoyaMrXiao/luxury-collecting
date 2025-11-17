@@ -9,14 +9,8 @@ import SwiftUI
 
 struct MyPageView: View {
     @ObservedObject var authViewModel: AuthViewModel
-    @State private var presentedSheet: SheetType? = nil
-    
-    enum SheetType: Identifiable {
-        case login
-        case register
-        
-        var id: Self { self }
-    }
+    @State private var isShowingLoginSheet = false
+    @State private var isShowingRegisterSheet = false
     
     var body: some View {
         List {
@@ -63,7 +57,7 @@ struct MyPageView: View {
                         
                         HStack(spacing: 12) {
                             Button(action: {
-                                presentedSheet = .login
+                                isShowingLoginSheet = true
                             }) {
                                 Text("登录")
                                     .font(.headline)
@@ -81,7 +75,7 @@ struct MyPageView: View {
                             }
                             
                             Button(action: {
-                                presentedSheet = .register
+                                isShowingRegisterSheet = true
                             }) {
                                 Text("注册")
                                     .font(.headline)
@@ -153,15 +147,16 @@ struct MyPageView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("我的")
-        .sheet(item: $presentedSheet) { sheetType in
-            switch sheetType {
-            case .login:
-                LoginView(authViewModel: authViewModel, onShowRegister: {
-                    presentedSheet = .register
-                })
-            case .register:
-                RegisterView(authViewModel: authViewModel)
-            }
+        .sheet(isPresented: $isShowingLoginSheet) {
+            LoginView(authViewModel: authViewModel, onShowRegister: {
+                isShowingLoginSheet = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    isShowingRegisterSheet = true
+                }
+            })
+        }
+        .sheet(isPresented: $isShowingRegisterSheet) {
+            RegisterView(authViewModel: authViewModel)
         }
     }
 }
